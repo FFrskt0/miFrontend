@@ -123,6 +123,17 @@ export function ProveedoresView() {
         }
     };
 
+    const eliminarProveedor = async (proveedor) => {
+        if (!window.confirm(`¿Eliminar al proveedor "${proveedor.razon_social}"?`)) return;
+
+        try {
+            await api.delete(`/proveedores/${proveedor.id}`);
+            await cargarProveedores();
+        } catch (requestError) {
+            setError(requestError.response?.data?.error || 'No se pudo eliminar el proveedor. Verifica tus permisos o si tiene productos asociados.');
+        }
+    };
+
     return (
         <section>
             <h1 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '16px' }}>Proveedores</h1>
@@ -134,7 +145,7 @@ export function ProveedoresView() {
                 <input style={fieldStyle} type="email" placeholder="Correo electrónico" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
                 <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#2563eb', color: '#fff', border: 0, borderRadius: '4px' }}>Agregar proveedor</button>
             </form>
-            <Table headings={['ID', 'Razón social', 'Contacto', 'Teléfono', 'Correo']} empty={proveedores.length ? '' : 'Aún no hay proveedores.'}>
+            <Table headings={['ID', 'Razón social', 'Contacto', 'Teléfono', 'Correo', 'Acciones']} empty={proveedores.length ? '' : 'Aún no hay proveedores.'}>
                 {proveedores.map((proveedor) => (
                     <tr key={proveedor.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <td style={{ padding: '10px' }}>{proveedor.id}</td>
@@ -142,6 +153,17 @@ export function ProveedoresView() {
                         <td style={{ padding: '10px' }}>{proveedor.contacto || '—'}</td>
                         <td style={{ padding: '10px' }}>{proveedor.telefono || '—'}</td>
                         <td style={{ padding: '10px' }}>{proveedor.email || '—'}</td>
+                        <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
+                            <button
+                                type="button"
+                                title={`Eliminar ${proveedor.razon_social}`}
+                                aria-label={`Eliminar ${proveedor.razon_social}`}
+                                onClick={() => eliminarProveedor(proveedor)}
+                                style={{ ...actionStyle, color: '#b91c1c' }}
+                            >
+                                <Trash2 size={17} />
+                            </button>
+                        </td>
                     </tr>
                 ))}
             </Table>
@@ -177,6 +199,17 @@ export function UsuariosView() {
         }
     };
 
+    const eliminarUsuario = async (usuario) => {
+        if (!window.confirm(`¿Eliminar al usuario "${usuario.nombre}"?`)) return;
+
+        try {
+            await api.delete(`/usuarios/${usuario.id}`);
+            await cargarUsuarios();
+        } catch (requestError) {
+            setError(requestError.response?.data?.error || 'No se pudo eliminar el usuario.');
+        }
+    };
+
     return (
         <section>
             <h1 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '16px' }}>Usuarios</h1>
@@ -192,13 +225,24 @@ export function UsuariosView() {
                 </select>
                 <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#2563eb', color: '#fff', border: 0, borderRadius: '4px' }}>Agregar usuario</button>
             </form>
-            <Table headings={['ID', 'Nombre', 'Correo', 'Rol']} empty={usuarios.length ? '' : 'Aún no hay usuarios.'}>
+            <Table headings={['ID', 'Nombre', 'Correo', 'Rol', 'Acciones']} empty={usuarios.length ? '' : 'Aún no hay usuarios.'}>
                 {usuarios.map((usuario) => (
                     <tr key={usuario.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                         <td style={{ padding: '10px' }}>{usuario.id}</td>
                         <td style={{ padding: '10px' }}>{usuario.nombre}</td>
                         <td style={{ padding: '10px' }}>{usuario.email}</td>
                         <td style={{ padding: '10px' }}>{usuario.rol}</td>
+                        <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
+                            <button
+                                type="button"
+                                title={`Eliminar ${usuario.nombre}`}
+                                aria-label={`Eliminar ${usuario.nombre}`}
+                                onClick={() => eliminarUsuario(usuario)}
+                                style={{ ...actionStyle, color: '#b91c1c' }}
+                            >
+                                <Trash2 size={17} />
+                            </button>
+                        </td>
                     </tr>
                 ))}
             </Table>
@@ -214,25 +258,37 @@ export function KardexView() {
     const [error, setError] = useState('');
 
     const cargarDatos = async () => {
-        try {
-            const [movimientosResponse, productosResponse, usuariosResponse] = await Promise.all([
-                api.get('/movimientos'),
-                api.get('/productos'),
-                api.get('/usuarios')
-            ]);
-            setMovimientos(movimientosResponse.data);
-            setProductos(productosResponse.data);
-            setUsuarios(usuariosResponse.data);
-            setError('');
-        } catch (requestError) {
-            setError(requestError.response?.data?.error || 'No se pudieron cargar los datos del Kardex.');
-        }
+        const resultados = await Promise.allSettled([
+            api.get('/movimientos'),
+            api.get('/productos'),
+            api.get('/usuarios')
+        ]);
+        const mensajes = [];
+
+        resultados.forEach((resultado, indice) => {
+            if (resultado.status === 'fulfilled') {
+                const datos = Array.isArray(resultado.value.data) ? resultado.value.data : [];
+                if (indice === 0) setMovimientos(datos);
+                if (indice === 1) setProductos(datos);
+                if (indice === 2) {
+                    setUsuarios(datos);
+                    if (datos.length === 1) {
+                        setForm((actual) => ({ ...actual, usuario_id: String(datos[0].id) }));
+                    }
+                }
+            } else {
+                mensajes.push(resultado.reason.response?.data?.error || 'No se pudieron cargar todos los datos del Kardex.');
+            }
+        });
+
+        setError(mensajes.join(' '));
     };
 
     useEffect(() => { queueMicrotask(cargarDatos); }, []);
 
     const registrarMovimiento = async (event) => {
         event.preventDefault();
+        setError('');
         try {
             await api.post('/movimientos', form);
             setForm({ producto_id: '', usuario_id: '', tipo_movimiento: 'Entrada', cantidad: '', observaciones: '' });
@@ -260,7 +316,7 @@ export function KardexView() {
                     <option>Salida</option>
                     <option>Ajuste</option>
                 </select>
-                <input style={fieldStyle} type="number" min="1" placeholder="Cantidad" value={form.cantidad} onChange={(event) => setForm({ ...form, cantidad: event.target.value })} required />
+                <input style={fieldStyle} type="number" min={form.tipo_movimiento === 'Ajuste' ? '0' : '1'} placeholder={form.tipo_movimiento === 'Ajuste' ? 'Stock contado' : 'Cantidad'} value={form.cantidad} onChange={(event) => setForm({ ...form, cantidad: event.target.value })} required />
                 <textarea style={{ ...fieldStyle, minHeight: '70px', resize: 'vertical' }} placeholder="Observaciones (opcional)" value={form.observaciones} onChange={(event) => setForm({ ...form, observaciones: event.target.value })} />
                 <button type="submit" disabled={!productos.length || !usuarios.length} style={{ width: '100%', padding: '10px', backgroundColor: '#2563eb', color: '#fff', border: 0, borderRadius: '4px' }}>Registrar movimiento</button>
                 {(!productos.length || !usuarios.length) && <p style={{ color: '#6b7280', marginTop: '10px' }}>Agrega al menos un producto y un usuario para registrar movimientos.</p>}

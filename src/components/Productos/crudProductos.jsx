@@ -1,167 +1,288 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Pencil, Trash2, X } from 'lucide-react';
-import api from '../../services/api';
+import { useState, useEffect, useCallback } from "react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import api from "../../services/api";
 
-const emptyForm = { nombre: '', descripcion: '', precio: '', stock: '', categoria_id: '' };
+const formularioVacio = () => ({
+    id: null,
+    nombre: "",
+    descripcion: "",
+    precio: "",
+    stock: "",
+    categoria_id: "",
+    proveedor_id: "",
+});
 
-export const CrudProductos = () => {
+const CrudProductos = () => {
     const [productos, setProductos] = useState([]);
     const [categorias, setCategorias] = useState([]);
-    const [form, setForm] = useState(emptyForm);
+    const [proveedores, setProveedores] = useState([]);
+    const [cargando, setCargando] = useState(true);
+    const [cargandoCategorias, setCargandoCategorias] = useState(true);
+    const [cargandoProveedores, setCargandoProveedores] = useState(true);
+    const [guardando, setGuardando] = useState(false);
     const [error, setError] = useState('');
+    const [errorCategorias, setErrorCategorias] = useState('');
+    const [errorProveedores, setErrorProveedores] = useState('');
+    const [form, setForm] = useState(formularioVacio);
 
-    const cargarDatos = async () => {
+    const obtenerProductos = useCallback(async () => {
         try {
-            const [resProd, resCat] = await Promise.all([
-                api.get('/productos'),
-                api.get('/categorias')
-            ]);
-            setProductos(resProd.data);
-            setCategorias(resCat.data);
+            const response = await api.get('/productos');
+            setProductos(Array.isArray(response.data) ? response.data : []);
             setError('');
         } catch (requestError) {
-            setError(requestError.response?.data?.error || 'No se pudieron cargar los productos.');
+            setError(requestError.response?.data?.message || requestError.response?.data?.error || 'No se pudieron cargar los productos. Comprueba tu conexión e inténtalo nuevamente.');
+        } finally {
+            setCargando(false);
         }
-    };
+    }, []);
+
+    const obtenerCategorias = useCallback(async () => {
+        try {
+            const response = await api.get('/categorias');
+            setCategorias(Array.isArray(response.data) ? response.data : []);
+            setErrorCategorias('');
+        } catch (requestError) {
+            setErrorCategorias(requestError.response?.data?.error || 'No se pudieron cargar las categorías.');
+        } finally {
+            setCargandoCategorias(false);
+        }
+    }, []);
+
+    const obtenerProveedores = useCallback(async () => {
+        try {
+            const response = await api.get('/proveedores');
+            setProveedores(Array.isArray(response.data) ? response.data : []);
+            setErrorProveedores('');
+        } catch (requestError) {
+            setErrorProveedores(requestError.response?.data?.error || 'No se pudieron cargar los proveedores.');
+        } finally {
+            setCargandoProveedores(false);
+        }
+    }, []);
 
     useEffect(() => {
-        queueMicrotask(cargarDatos);
-    }, []);
+        queueMicrotask(() => {
+            void obtenerProductos();
+            void obtenerCategorias();
+            void obtenerProveedores();
+        });
+    }, [obtenerProductos, obtenerCategorias, obtenerProveedores]);
+
+    const handleChange = (e) => {
+        setForm({ ...form, [e.target.name]: e.target.value });
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setGuardando(true);
+        setError('');
         try {
+            const { id, ...datosProducto } = form;
+            const producto = {
+                ...datosProducto,
+                precio: Number(datosProducto.precio),
+                stock: Number(datosProducto.stock),
+                categoria_id: Number(datosProducto.categoria_id),
+                proveedor_id: datosProducto.proveedor_id ? Number(datosProducto.proveedor_id) : null,
+            };
             if (form.id) {
-                await api.put(`/productos/${form.id}`, form);
+                await api.put(`/productos/${id}`, producto);
             } else {
-                await api.post('/productos', form);
+                await api.post("/productos", producto);
             }
-            setForm(emptyForm);
-            await cargarDatos();
+            setForm(formularioVacio());
+            await obtenerProductos();
         } catch (requestError) {
-            setError(requestError.response?.data?.error || 'No se pudo guardar el producto.');
+            setError(requestError.response?.data?.message || requestError.response?.data?.error || 'No se pudo guardar el producto. Revisa los datos e inténtalo nuevamente.');
+        } finally {
+            setGuardando(false);
         }
     };
 
-    const editarProducto = (producto) => {
+    const handleEdit = (producto) => {
         setForm({
-            id: producto.id,
-            nombre: producto.nombre || '',
-            descripcion: producto.descripcion || '',
-            precio: producto.precio ?? '',
-            stock: producto.stock ?? '',
-            categoria_id: producto.categoria_id || producto.categoria?.id || ''
+            ...producto,
+            precio: String(producto.precio),
+            stock: String(producto.stock),
+            categoria_id: String(producto.categoria_id ?? producto.categoria?.id ?? ''),
+            proveedor_id: producto.proveedor_id ? String(producto.proveedor_id) : '',
         });
-        setError('');
     };
 
-    const eliminarProducto = async (producto) => {
-        if (!window.confirm(`¿Eliminar el producto "${producto.nombre}"?`)) return;
-        try {
-            await api.delete(`/productos/${producto.id}`);
-            if (form.id === producto.id) setForm(emptyForm);
-            await cargarDatos();
-        } catch (requestError) {
-            setError(requestError.response?.data?.error || 'No se pudo eliminar el producto.');
+    const handleDelete = async (id) => {
+        if (window.confirm("¿Seguro que deseas eliminar este producto?")) {
+            try {
+                await api.delete(`/productos/${id}`);
+                if (form.id === id) setForm(formularioVacio());
+                await obtenerProductos();
+            } catch (requestError) {
+                setError(requestError.response?.data?.message || requestError.response?.data?.error || 'No se pudo eliminar el producto.');
+            }
         }
     };
 
     return (
-        <div>
-            <h1 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '16px' }}>Gestión de Productos</h1>
-            {error && <p role="alert" style={{ color: '#b91c1c', marginBottom: '12px' }}>{error}</p>}
-            {categorias.length === 0 && (
-                <p style={{ marginBottom: '12px' }}>
-                    Primero agrega una categoría en <Link to="/categorias">Categorías</Link> para poder registrar productos.
-                </p>
-            )}
-            
-            {/* Formulario */}
-            <form onSubmit={handleSubmit} style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '450px', marginBottom: '24px' }}>
-                <input
-                    type="text"
-                    placeholder="Nombre"
-                    value={form.nombre}
-                    onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-                    required
-                    style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-                />
-                <input
-                    type="text"
-                    placeholder="Descripción"
-                    value={form.descripcion}
-                    onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
-                    style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-                />
-                <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Precio"
-                    value={form.precio}
-                    onChange={(e) => setForm({ ...form, precio: e.target.value })}
-                    required
-                    style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-                />
-                <input
-                    type="number"
-                    placeholder="Stock"
-                    value={form.stock}
-                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                    required
-                    disabled={categorias.length === 0}
-                    style={{ width: '100%', marginBottom: '10px', padding: '8px' }}
-                />
-                
-                {/* Select Relacional */}
-                <select
-                    value={form.categoria_id}
-                    onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
-                    required
-                    style={{ width: '100%', marginBottom: '12px', padding: '8px' }}
-                >
-                    <option value="">-- Seleccionar Categoría --</option>
-                    {categorias.map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.nombre}</option>
-                    ))}
-                </select>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="submit" disabled={categorias.length === 0} style={{ flex: 1, padding: '10px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: categorias.length ? 'pointer' : 'not-allowed' }}>
-                        {form.id ? 'Actualizar Producto' : 'Guardar Producto'}
-                    </button>
-                    {form.id && <button type="button" title="Cancelar edición" onClick={() => setForm(emptyForm)} style={{ padding: '10px', border: '1px solid #d1d5db', borderRadius: '4px', background: '#fff' }}><X size={18} /></button>}
+        <main className="inventory-page">
+            <div className="page-heading">
+                <div>
+                    <p className="eyebrow">INVENTARIO</p>
+                    <h1>Productos</h1>
+                    <p className="page-heading__subtitle">Administra existencias, precios y detalles de tus productos.</p>
                 </div>
-            </form>
+                <span className="product-count">{productos.length} {productos.length === 1 ? 'producto' : 'productos'}</span>
+            </div>
+            {error && <div className="form-error" role="alert">{error}</div>}
+            {errorCategorias && <div className="form-error" role="alert">{errorCategorias}</div>}
+            {errorProveedores && <div className="form-error" role="alert">{errorProveedores}</div>}
+            <div className="products-layout">
+                <section className="product-form-panel" aria-labelledby="product-form-title">
+                    <h2 id="product-form-title">{form.id ? "Editar producto" : "Nuevo producto"}</h2>
+                    <form onSubmit={handleSubmit} className="product-form">
+                        <div className="form-field">
+                            <label htmlFor="product-name">Nombre</label>
+                            <input
+                                id="product-name"
+                                type="text"
+                                name="nombre"
+                                value={form.nombre}
+                                onChange={handleChange}
+                                required
+                                maxLength={120}
+                                autoComplete="off"
+                            />
+                        </div>
+                        <div className="form-field">
+                            <label htmlFor="product-description">Descripción <span>(opcional)</span></label>
+                            <input
+                                id="product-description"
+                                type="text"
+                                name="descripcion"
+                                value={form.descripcion}
+                                onChange={handleChange}
+                                maxLength={500}
+                            />
+                        </div>
+                        <div className="form-field">
+                            <label htmlFor="product-price">Precio (S/)</label>
+                            <input
+                                id="product-price"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                name="precio"
+                                value={form.precio}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <div className="form-field">
+                            <label htmlFor="product-stock">Stock</label>
+                            <input
+                                id="product-stock"
+                                type="number"
+                                min="0"
+                                name="stock"
+                                value={form.stock}
+                                onChange={handleChange}
+                                required
+                            />
+                        </div>
+                        <div className="form-field">
+                            <label htmlFor="product-category">Categoría</label>
+                            <select
+                                id="product-category"
+                                name="categoria_id"
+                                value={form.categoria_id}
+                                onChange={handleChange}
+                                disabled={cargandoCategorias || categorias.length === 0}
+                                required
+                            >
+                                <option value="">{cargandoCategorias ? 'Cargando categorías...' : 'Seleccionar categoría'}</option>
+                                {categorias.map((categoria) => (
+                                    <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+                                ))}
+                            </select>
+                            {!cargandoCategorias && categorias.length === 0 && !errorCategorias && (
+                                <span className="field-hint">Primero <Link to="/categorias">crea una categoría</Link> para asignarla al producto.</span>
+                            )}
+                        </div>
+                        <div className="form-field">
+                            <label htmlFor="product-supplier">Proveedor <span>(opcional)</span></label>
+                            <select
+                                id="product-supplier"
+                                name="proveedor_id"
+                                value={form.proveedor_id}
+                                onChange={handleChange}
+                                disabled={cargandoProveedores}
+                            >
+                                <option value="">Sin proveedor (compra minorista)</option>
+                                {proveedores.map((proveedor) => (
+                                    <option key={proveedor.id} value={proveedor.id}>{proveedor.razon_social}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="product-form__actions">
+                            <button className="button button--primary" type="submit" disabled={guardando || cargandoCategorias || categorias.length === 0}>
+                                <Plus size={17} aria-hidden="true" />
+                                {guardando ? 'Guardando…' : form.id ? 'Actualizar producto' : 'Agregar producto'}
+                            </button>
+                            {form.id && <button className="button button--secondary" type="button" onClick={() => setForm(formularioVacio())}><X size={17} aria-hidden="true" />Cancelar</button>}
+                        </div>
+                    </form>
+                </section>
 
-            {/* Tabla con Categoría Relacionada */}
-            <table style={{ width: '100%', backgroundColor: '#fff', borderRadius: '8px', borderCollapse: 'collapse' }}>
-                <thead>
-                    <tr style={{ backgroundColor: '#1e293b', color: '#fff', textAlign: 'left' }}>
-                        <th style={{ padding: '10px' }}>ID</th>
-                        <th style={{ padding: '10px' }}>Nombre</th>
-                        <th style={{ padding: '10px' }}>Categoría</th>
-                        <th style={{ padding: '10px' }}>Precio</th>
-                        <th style={{ padding: '10px' }}>Stock</th>
-                        <th style={{ padding: '10px' }}>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {productos.map(p => (
-                        <tr key={p.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                            <td style={{ padding: '10px' }}>{p.id}</td>
-                            <td style={{ padding: '10px' }}>{p.nombre}</td>
-                            <td style={{ padding: '10px' }}>{p.categoria?.nombre || 'Sin categoría'}</td>
-                            <td style={{ padding: '10px' }}>S/ {p.precio}</td>
-                            <td style={{ padding: '10px' }}>{p.stock}</td>
-                            <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
-                                <button type="button" title="Editar producto" onClick={() => editarProducto(p)} style={{ border: 0, background: 'transparent', cursor: 'pointer', marginRight: '8px' }}><Pencil size={17} /></button>
-                                <button type="button" title="Eliminar producto" onClick={() => eliminarProducto(p)} style={{ border: 0, background: 'transparent', color: '#b91c1c', cursor: 'pointer' }}><Trash2 size={17} /></button>
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
+                <section className="product-list-panel" aria-labelledby="product-list-title">
+                    <div className="section-heading">
+                        <h2 id="product-list-title">Lista de productos</h2>
+                    </div>
+                    <div className="table-scroll">
+                        <table className="products-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">ID</th>
+                                    <th scope="col">Producto</th>
+                                    <th scope="col">Categoría</th>
+                                    <th scope="col">Proveedor</th>
+                                    <th scope="col">Precio</th>
+                                    <th scope="col">Stock</th>
+                                    <th scope="col"><span className="visually-hidden">Acciones</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {cargando ? (
+                                    <tr><td className="table-message" colSpan="7">Cargando productos...</td></tr>
+                                ) : productos.length === 0 ? (
+                                    <tr><td className="table-message" colSpan="7">Aún no hay productos. Agrega el primero desde el formulario.</td></tr>
+                                ) : productos.map((prod) => (
+                                    <tr key={prod.id}>
+                                        <td className="product-id">{prod.id}</td>
+                                        <td>
+                                            <span className="product-name">{prod.nombre}</span>
+                                            {prod.descripcion && <span className="product-description">{prod.descripcion}</span>}
+                                        </td>
+                                        <td>{prod.categoria?.nombre || 'Sin categoría'}</td>
+                                        <td>{prod.proveedor?.razon_social || 'Sin proveedor'}</td>
+                                        <td>S/ {Number(prod.precio).toFixed(2)}</td>
+                                        <td><span className={`stock-value${Number(prod.stock) === 0 ? ' stock-value--empty' : ''}`}>{prod.stock}</span></td>
+                                        <td className="table-actions">
+                                            <button className="icon-button" type="button" title={`Editar ${prod.nombre}`} aria-label={`Editar ${prod.nombre}`} onClick={() => handleEdit({ ...prod, precio: String(prod.precio), stock: String(prod.stock) })}>
+                                                <Pencil size={17} aria-hidden="true" />
+                                            </button>
+                                            <button className="icon-button icon-button--danger" type="button" title={`Eliminar ${prod.nombre}`} aria-label={`Eliminar ${prod.nombre}`} onClick={() => handleDelete(prod.id)}>
+                                                <Trash2 size={17} aria-hidden="true" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
     );
 };
+
+export default CrudProductos;
